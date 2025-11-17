@@ -35,8 +35,8 @@ app.post('/scrape-full', async (req, res) => {
     const page = await browser.newPage();
     await page.goto(url, { waitUntil, timeout: 60000 });
 
-    const data = await page.evaluate((maxLinks, maxImages, includeText) => {
-      const out = {
+   const data = await page.evaluate(({ maxLinks, maxImages, includeText }) => {
+    const out = {
         url: window.location.href,
         title: document.title || null,
         meta: [],
@@ -48,71 +48,78 @@ app.post('/scrape-full', async (req, res) => {
         scripts: [],
         stylesheets: [],
         textBlocks: []
-      };
+    };
 
-      // meta tags
-      out.meta = Array.from(document.querySelectorAll('meta')).map(m => ({
+    // meta tags
+    out.meta = Array.from(document.querySelectorAll('meta')).map(m => ({
         name: m.getAttribute('name'),
         property: m.getAttribute('property'),
         content: m.getAttribute('content')
-      }));
+    }));
 
-      // open graph
-      out.openGraph = Array.from(document.querySelectorAll('meta[property^="og:"]')).map(m => ({
+    // open graph
+    out.openGraph = Array.from(
+        document.querySelectorAll('meta[property^="og:"]')
+    ).map(m => ({
         property: m.getAttribute('property'),
         content: m.getAttribute('content')
-      }));
+    }));
 
-      // json-ld
-      out.jsonLd = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
-        .map(s => {
-          try {
-            return JSON.parse(s.textContent);
-          } catch {
-            return s.textContent.trim();
-          }
-        });
+    // json-ld
+    out.jsonLd = Array.from(
+        document.querySelectorAll('script[type="application/ld+json"]')
+    ).map(s => {
+        try {
+        return JSON.parse(s.textContent);
+        } catch {
+        return (s.textContent || '').trim();
+        }
+    });
 
-      // headings
-      out.headings = Array.from(document.querySelectorAll('h1, h2, h3, h4'))
-        .map(h => ({
-          tag: h.tagName.toLowerCase(),
-          text: (h.innerText || '').trim()
-        }));
+    // headings
+    out.headings = Array.from(
+        document.querySelectorAll('h1, h2, h3, h4')
+    ).map(h => ({
+        tag: h.tagName.toLowerCase(),
+        text: (h.innerText || '').trim()
+    }));
 
-      // links
-      out.links = Array.from(document.querySelectorAll('a[href]'))
+    // links
+    out.links = Array.from(document.querySelectorAll('a[href]'))
         .slice(0, maxLinks)
         .map(a => ({
-          href: a.href,
-          text: (a.innerText || '').trim()
+        href: a.href,
+        text: (a.innerText || '').trim()
         }));
 
-      // images
-      out.images = Array.from(document.querySelectorAll('img[src]'))
+    // images
+    out.images = Array.from(document.querySelectorAll('img[src]'))
         .slice(0, maxImages)
         .map(img => ({
-          src: img.src,
-          alt: img.alt || null
+        src: img.src,
+        alt: img.alt || null
         }));
 
-      // scripts
-      out.scripts = Array.from(document.querySelectorAll('script[src]'))
-        .map(s => s.src);
+    // scripts
+    out.scripts = Array.from(document.querySelectorAll('script[src]')).map(
+        s => s.src
+    );
 
-      // stylesheets
-      out.stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
-        .map(l => l.href);
+    // stylesheets
+    out.stylesheets = Array.from(
+        document.querySelectorAll('link[rel="stylesheet"]')
+    ).map(l => l.href);
 
-      if (includeText) {
+    if (includeText) {
         out.textBlocks = Array.from(document.querySelectorAll('p'))
-          .map(p => (p.innerText || '').trim())
-          .filter(t => t.length > 0)
-          .slice(0, 500);
-      }
+        .map(p => (p.innerText || '').trim())
+        .filter(t => t.length > 0)
+        .slice(0, 500);
+    }
 
-      return out;
-    }, maxLinks, maxImages, includeText);
+    return out;
+    }, { maxLinks, maxImages, includeText });
+
 
     res.json({ scrapedAt: new Date().toISOString(), data });
   } catch (err) {
