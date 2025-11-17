@@ -17,7 +17,7 @@ app.post('/scrape-full', async (req, res) => {
   }
 
   const {
-    waitUntil = 'networkidle',
+    waitUntil = 'domcontentloaded', // more stable for SPAs
     maxLinks = 1000,
     maxImages = 500,
     includeText = false,
@@ -32,7 +32,6 @@ app.post('/scrape-full', async (req, res) => {
 
     const page = await browser.newPage();
 
-    // Reasonable defaults for many sites
     await page.setViewportSize({ width: 1366, height: 768 });
     await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -44,93 +43,109 @@ app.post('/scrape-full', async (req, res) => {
       timeout: 60000,
     });
 
-    // IMPORTANT: single argument object only
-    const data = await page.evaluate(({ maxLinks, maxImages, includeText }) => {
-      const out = {
-        url: window.location.href,
-        title: document.title || null,
-        meta: [],
-        openGraph: [],
-        jsonLd: [],
-        headings: [],
-        links: [],
-        images: [],
-        scripts: [],
-        stylesheets: [],
-        textBlocks: [],
-      };
+    // Let initial content settle
+    await page.waitForTimeout(3000);
 
-      // meta tags
-      out.meta = Array.from(document.querySelectorAll('meta')).map((m) => ({
-        name: m.getAttribute('name'),
-        property: m.getAttribute('property'),
-        content: m.getAttribute('content'),
-      }));
+    // Scroll to bottom to trigger lazy loading
+    await page.evaluate(async () => {
+      await new Promise((resolve) => {
+        let totalHeight = 0;
+        const distance = 800;
+        const timer = setInterval(() => {
+          const { scrollHeight } = document.body;
+          window.scrollBy(0, distance);
+          totalHeight += distance;
 
-      // Open Graph tags
-      out.openGraph = Array.from(
-        document.querySelectorAll('meta[property^="og:"]'),
-      ).map((m) => ({
-        property: m.getAttribute('property'),
-        content: m.getAttribute('content'),
-      }));
-
-      // JSON-LD
-      out.jsonLd = Array.from(
-        document.querySelectorAll('script[type="application/ld+json"]'),
-      ).map((s) => {
-        const raw = s.textContent || '';
-        try {
-          return JSON.parse(raw);
-        } catch {
-          return raw.trim();
-        }
+          if (totalHeight >= scrollHeight) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 400);
       });
+    });
 
-      // Headings
-      out.headings = Array.from(
-        document.querySelectorAll('h1, h2, h3, h4'),
-      ).map((h) => ({
-        tag: h.tagName.toLowerCase(),
-        text: (h.innerText || '').trim(),
-      }));
+    await page.waitForTimeout(2000);
 
-      // Links (limited)
-      out.links = Array.from(document.querySelectorAll('a[href]'))
-        .slice(0, maxLinks)
-        .map((a) => ({
-          href: a.href,
-          text: (a.innerText || '').trim(),
+    const data = await page.evaluate(
+      ({ maxLinks, maxImages, includeText }) => {
+        const out = {
+          url: window.location.href,
+          title: document.title || null,
+          meta: [],
+          openGraph: [],
+          jsonLd: [],
+          headings: [],
+          links: [],
+          images: [],
+          scripts: [],
+          stylesheets: [],
+          textBlocks: [],
+        };
+
+        out.meta = Array.from(document.querySelectorAll('meta')).map((m) => ({
+          name: m.getAttribute('name'),
+          property: m.getAttribute('property'),
+          content: m.getAttribute('content'),
         }));
 
-      // Images (limited)
-      out.images = Array.from(document.querySelectorAll('img[src]'))
-        .slice(0, maxImages)
-        .map((img) => ({
-          src: img.src,
-          alt: img.alt || null,
+        out.openGraph = Array.from(
+          document.querySelectorAll('meta[property^="og:"]'),
+        ).map((m) => ({
+          property: m.getAttribute('property'),
+          content: m.getAttribute('content'),
         }));
 
-      // Script URLs
-      out.scripts = Array.from(document.querySelectorAll('script[src]')).map(
-        (s) => s.src,
-      );
+        out.jsonLd = Array.from(
+          document.querySelectorAll('script[type="application/ld+json"]'),
+        ).map((s) => {
+          const raw = s.textContent || '';
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return raw.trim();
+          }
+        });
 
-      // Stylesheet URLs
-      out.stylesheets = Array.from(
-        document.querySelectorAll('link[rel="stylesheet"]'),
-      ).map((l) => l.href);
+        out.headings = Array.from(
+          document.querySelectorAll('h1, h2, h3, h4'),
+        ).map((h) => ({
+          tag: h.tagName.toLowerCase(),
+          text: (h.innerText || '').trim(),
+        }));
 
-      // Optional text blocks
-      if (includeText) {
-        out.textBlocks = Array.from(document.querySelectorAll('p'))
-          .map((p) => (p.innerText || '').trim())
-          .filter((t) => t.length > 0)
-          .slice(0, 500);
-      }
+        out.links = Array.from(document.querySelectorAll('a[href]'))
+          .slice(0, maxLinks)
+          .map((a) => ({
+            href: a.href,
+            text: (a.innerText || '').trim(),
+          }));
 
-      return out;
-    }, { maxLinks, maxImages, includeText });
+        out.images = Array.from(document.querySelectorAll('img[src]'))
+          .slice(0, maxImages)
+          .map((img) => ({
+            src: img.src,
+            alt: img.alt || null,
+          }));
+
+        out.scripts = Array.from(
+          document.querySelectorAll('script[src]'),
+        ).map((s) => s.src);
+
+        out.stylesheets = Array.from(
+          document.querySelectorAll('link[rel="stylesheet"]'),
+        ).map((l) => l.href);
+
+        if (includeText) {
+          out.textBlocks = Array.from(document.querySelectorAll('p'))
+            .map((p) => (p.innerText || '').trim())
+            .filter((t) => t.length > 0)
+            .slice(0, 500);
+        }
+
+        return out;
+      },
+      { maxLinks, maxImages, includeText },
+    );
 
     res.json({
       scrapedAt: new Date().toISOString(),
@@ -150,6 +165,7 @@ app.post('/scrape-full', async (req, res) => {
     }
   }
 });
+
 
 // Render / Docker PORT
 const port = process.env.PORT || 3000;
