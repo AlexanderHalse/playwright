@@ -1,5 +1,5 @@
 # Use official Playwright image which already has Chrome/Firefox/WebKit & deps
-FROM mcr.microsoft.com/playwright:v1.48.2-jammy
+FROM mcr.microsoft.com/playwright:v1.56.1-jammy
 
 # Create app directory
 WORKDIR /app
