@@ -30,13 +30,14 @@ app.post('/scrape-full', async (req, res) => {
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     });
 
-    const page = await browser.newPage();
+    const context = await browser.newContext({
+        viewport: { width: 1366, height: 768 },
+        userAgent:
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+            '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        });
+    const page = await context.newPage();
 
-    await page.setViewportSize({ width: 1366, height: 768 });
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    );
 
     await page.goto(url, {
       waitUntil,
