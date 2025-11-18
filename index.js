@@ -9,7 +9,7 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'Scraper service running' });
 });
 
-// Screenshot-tiles endpoint: fixed viewport, multiple PNGs
+// Screenshot endpoint: scroll page, then full-page PNG screenshot
 app.post('/scrape-full', async (req, res) => {
   const { url, options = {} } = req.body || {};
   if (!url) {
@@ -18,15 +18,8 @@ app.post('/scrape-full', async (req, res) => {
 
   const {
     waitUntil = 'domcontentloaded',
+    // optional raw Cookie header string (your long cf_clearance + others)
     cookieHeader = null,
-
-    // viewport config (fixed size for all screenshots)
-    viewportWidth = 1366,
-    viewportHeight = 768,
-
-    // safety limits
-    maxShots = 30,       // maximum number of tiles to capture
-    scrollOverlap = 0,   // pixels of overlap between shots (0 = none)
   } = options;
 
   let browser;
@@ -36,8 +29,9 @@ app.post('/scrape-full', async (req, res) => {
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     });
 
+    // Context with viewport + UA + optional Cookie header
     const context = await browser.newContext({
-      viewport: { width: viewportWidth, height: viewportHeight },
+      viewport: { width: 1366, height: 768 },
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       extraHTTPHeaders: cookieHeader ? { Cookie: cookieHeader } : undefined,
@@ -45,6 +39,7 @@ app.post('/scrape-full', async (req, res) => {
 
     const page = await context.newPage();
 
+    // Go to page
     await page.goto(url, {
       waitUntil,
       timeout: 60000,
@@ -53,7 +48,7 @@ app.post('/scrape-full', async (req, res) => {
     // Let initial content render
     await page.waitForTimeout(3000);
 
-    // Ensure everything lazy-loads at least once by scrolling to bottom
+    // Scroll to bottom to trigger lazy loading
     await page.evaluate(async () => {
       await new Promise((resolve) => {
         let totalHeight = 0;
@@ -71,47 +66,23 @@ app.post('/scrape-full', async (req, res) => {
       });
     });
 
-    // Small pause for final content
+    // Small pause after scroll so last items load
     await page.waitForTimeout(2000);
 
-    // Now calculate how many viewport-sized shots we need
-    const totalHeight = await page.evaluate(() => document.body.scrollHeight);
-    const effectiveStep = Math.max(1, viewportHeight - scrollOverlap);
-    const rawShots = Math.ceil(totalHeight / effectiveStep);
-    const numShots = Math.min(rawShots, maxShots);
-
-    const imagesBase64 = [];
-
-    for (let i = 0; i < numShots; i++) {
-      const y = i * effectiveStep;
-
-      await page.evaluate((scrollY) => {
-        window.scrollTo(0, scrollY);
-      }, y);
-
-      // wait a bit after each scroll
-      await page.waitForTimeout(600);
-
-      const buffer = await page.screenshot({
-        type: 'png',
-        fullPage: false, // viewport only
-      });
-
-      imagesBase64.push(buffer.toString('base64'));
-    }
-
-    res.json({
-      scrapedAt: new Date().toISOString(),
-      url,
-      viewport: { width: viewportWidth, height: viewportHeight },
-      totalHeight,
-      numShots,
-      images: imagesBase64, // each item is a base64 PNG for one tile
+    // Take full-page screenshot
+    const screenshotBuffer = await page.screenshot({
+      type: 'png',
+      fullPage: true,
     });
+
+    // Return PNG
+    res.set('Content-Type', 'image/png');
+    res.send(screenshotBuffer);
   } catch (err) {
-    console.error('SCREENSHOT TILES ERROR:', err);
+    console.error('SCREENSHOT ERROR:', err);
+    // On error, return JSON so client can inspect
     res.status(500).json({
-      error: 'Screenshot tiles failed',
+      error: 'Screenshot failed',
       name: err.name,
       message: err.message,
       stack: err.stack,
