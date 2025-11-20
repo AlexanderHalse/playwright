@@ -18,7 +18,6 @@ app.post('/scrape-full', async (req, res) => {
 
   const {
     waitUntil = 'domcontentloaded',
-    // optional raw Cookie header string (your long cf_clearance + others)
     cookieHeader = null,
   } = options;
 
@@ -29,26 +28,32 @@ app.post('/scrape-full', async (req, res) => {
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     });
 
-    // Context with viewport + UA + optional Cookie header
     const context = await browser.newContext({
       viewport: { width: 1366, height: 768 },
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      extraHTTPHeaders: cookieHeader ? { Cookie: cookieHeader } : undefined,
     });
+
+    // 1) Turn your header into real cookies
+    if (cookieHeader) {
+      const cookies = headerToCookies(cookieHeader, url);
+      await context.addCookies(cookies);
+    }
 
     const page = await context.newPage();
 
-    // Go to page
+    // 2) Navigate
     await page.goto(url, {
       waitUntil,
       timeout: 60000,
     });
 
-    // Let initial content render
+    // Optional: log what cookies Playwright sees (for debugging)
+    // console.log(await context.cookies());
+
+    // 3) Let it render + scroll, same as before
     await page.waitForTimeout(3000);
 
-    // Scroll to bottom to trigger lazy loading
     await page.evaluate(async () => {
       await new Promise((resolve) => {
         let totalHeight = 0;
@@ -66,21 +71,17 @@ app.post('/scrape-full', async (req, res) => {
       });
     });
 
-    // Small pause after scroll so last items load
     await page.waitForTimeout(2000);
 
-    // Take full-page screenshot
     const screenshotBuffer = await page.screenshot({
       type: 'png',
       fullPage: true,
     });
 
-    // Return PNG
     res.set('Content-Type', 'image/png');
     res.send(screenshotBuffer);
   } catch (err) {
     console.error('SCREENSHOT ERROR:', err);
-    // On error, return JSON so client can inspect
     res.status(500).json({
       error: 'Screenshot failed',
       name: err.name,
@@ -93,6 +94,21 @@ app.post('/scrape-full', async (req, res) => {
     }
   }
 });
+
+// Put the helper function outside the route
+function headerToCookies(cookieHeader, url) {
+  if (!cookieHeader) return [];
+  return cookieHeader
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((pair) => {
+      const [name, ...rest] = pair.split('=');
+      const value = rest.join('=');
+      return { name, value, url };
+    });
+}
+
 
 // Render / Docker PORT
 const port = process.env.PORT || 3000;
