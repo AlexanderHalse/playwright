@@ -48,12 +48,13 @@ app.post('/scrape-full', async (req, res) => {
       timeout: 60000,
     });
 
-    // Optional: log what cookies Playwright sees (for debugging)
-    // console.log(await context.cookies());
-
-    // 3) Let it render + scroll, same as before
+    // Let it render a bit
     await page.waitForTimeout(3000);
 
+    // 2b) Click expandable "read more" style buttons/links
+    await clickExpandables(page);
+
+    // 3) Scroll as before (you can also call clickExpandables again after scrolling if needed)
     await page.evaluate(async () => {
       await new Promise((resolve) => {
         let totalHeight = 0;
@@ -95,6 +96,34 @@ app.post('/scrape-full', async (req, res) => {
   }
 });
 
+// Click common "expand" triggers such as "Read more"
+async function clickExpandables(page) {
+  const selectors = [
+    'text=/read more/i',
+    'text=/show more/i',
+    'text=/view more/i',
+  ];
+
+  for (const sel of selectors) {
+    try {
+      const loc = page.locator(sel);
+      const count = await loc.count();
+      for (let i = 0; i < count; i++) {
+        try {
+          const el = loc.nth(i);
+          await el.scrollIntoViewIfNeeded();
+          await el.click({ timeout: 2000 });
+          await page.waitForTimeout(300);
+        } catch (e) {
+          // ignore individual failed clicks
+        }
+      }
+    } catch (e) {
+      // ignore selector errors
+    }
+  }
+}
+
 // Put the helper function outside the route
 function headerToCookies(cookieHeader, url) {
   if (!cookieHeader) return [];
@@ -108,7 +137,6 @@ function headerToCookies(cookieHeader, url) {
       return { name, value, url };
     });
 }
-
 
 // Render / Docker PORT
 const port = process.env.PORT || 3000;
