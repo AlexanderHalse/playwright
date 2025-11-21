@@ -99,9 +99,7 @@ app.post('/scrape-full', async (req, res) => {
 // Click common "expand" triggers such as "Read more"
 async function clickExpandables(page) {
   const selectors = [
-    'text=/read more/i',
-    'text=/show more/i',
-    'text=/view more/i',
+    'text=/expand all/i',
   ];
 
   for (const sel of selectors) {
